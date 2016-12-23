@@ -5,19 +5,24 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"strconv"
 
 	"errors"
 
+	jwt "github.com/dgrijalva/jwt-go"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
 )
 
 const (
-	dbUser     = "anyuser"
-	dbPassword = "anypassword"
-	dbName     = "anydbname"
+	dbUser          = "anyuser"
+	dbPassword      = "anypassword"
+	dbName          = "anydbname"
+	tokenExpiration = 24 //24hrs
 )
 
 //User ...
@@ -25,22 +30,38 @@ type User struct {
 	ID        string `json:"id,omitempty"`
 	Firstname string `json:"firstname,omitempty"`
 	Lastname  string `json:"lastname,omitempty"`
+	Username  string `json:"username,omitempty"`
+	Password  string `json:"password,omitempty"`
 }
 
 //SqlDB ...
 var SqlDB *sql.DB
 var dbDSN = dbUser + ":" + dbPassword + "@/" + dbName + "?charset=utf8"
 var internalError = errors.New("internal error")
+var signingKey = []byte("secret")
 
 /*
 * DB functions
  */
+func getUserByUsername(username string) (User, error) {
+
+	var user User
+	var err error
+
+	err = SqlDB.QueryRow("select id,firstname,lastname,username,password from user where username=?", username).Scan(&user.ID, &user.Firstname, &user.Lastname, &user.Username, &user.Password)
+	if err != nil && err != sql.ErrNoRows {
+		return user, internalError
+	}
+
+	return user, err
+}
+
 func getUsers() ([]User, error) {
 
 	var sqlDBRows *sql.Rows
 	var err error
 
-	sqlDBRows, err = SqlDB.Query("SELECT * FROM user")
+	sqlDBRows, err = SqlDB.Query("SELECT id,firstname,lastname FROM user")
 	if err != nil {
 		return nil, internalError
 	}
@@ -63,7 +84,7 @@ func getUserByID(id int) (User, error) {
 	var user User
 	var err error
 
-	err = SqlDB.QueryRow("select * from user where id=?", id).Scan(&user.ID, &user.Firstname, &user.Lastname)
+	err = SqlDB.QueryRow("select id,firstname,lastname from user where id=?", id).Scan(&user.ID, &user.Firstname, &user.Lastname)
 	if err != nil && err != sql.ErrNoRows {
 		return user, internalError
 	}
@@ -150,6 +171,42 @@ func updateUser(user User) (User, error) {
 * REST API Endpoints
  */
 
+func tokenAPI(w http.ResponseWriter, req *http.Request) {
+
+	var user User
+	_ = json.NewDecoder(req.Body).Decode(&user)
+
+	existingUser, err := getUserByUsername(user.Username)
+	if err == sql.ErrNoRows {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	} else if err == internalError {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(existingUser.Password), []byte(user.Password))
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"firstname": user.Firstname,
+		"lastname":  user.Lastname,
+		"exp":       time.Now().Add(time.Hour * tokenExpiration).Unix(),
+	})
+
+	//Sign the token with secret
+	tokenString, err := token.SignedString(signingKey)
+	if err == internalError {
+		w.WriteHeader(http.StatusInternalServerError)
+	} else {
+		w.Write([]byte(tokenString))
+	}
+
+}
+
 func getUsersAPI(w http.ResponseWriter, req *http.Request) {
 	users, err := getUsers()
 	if err == internalError {
@@ -234,7 +291,45 @@ func main() {
 		panic(err)
 	}
 
+	//sample generate password
+	//passwordSecret := []byte("supersecret")
+	//passwordSecret := []byte("supersecret123")
+	/*
+		passwordSecret := []byte("supersecret45")
+
+		hashPassword, err := bcrypt.GenerateFromPassword(passwordSecret, bcrypt.DefaultCost)
+		if err != nil {
+			fmt.Println("error bcryt password", err)
+		} else {
+			fmt.Println("ok bcryt password")
+			fmt.Println(string(hashPassword))
+
+			var sqlDBStmt *sql.Stmt
+			var err error
+
+			sqlDBStmt, err = SqlDB.Prepare("update user set password=? where id=5")
+			if err != nil {
+				panic(err)
+			}
+
+			_, err = sqlDBStmt.Exec(string(hashPassword))
+			if err != nil {
+				panic(err)
+			} else {
+				fmt.Println("ok genrate password")
+			}
+
+			err = bcrypt.CompareHashAndPassword(hashPassword, passwordSecret)
+			if err != nil {
+				fmt.Println(err) // nil means it is a match
+			} else {
+				fmt.Println("matched password")
+			}
+		}*/
+
 	router := mux.NewRouter()
+
+	router.HandleFunc("/token", tokenAPI).Methods("POST")
 	router.HandleFunc("/user", getUsersAPI).Methods("GET")
 	router.HandleFunc("/user/{id}", getUserAPI).Methods("GET")
 	router.HandleFunc("/user", createUserAPI).Methods("POST")
