@@ -291,42 +291,6 @@ func main() {
 		panic(err)
 	}
 
-	//sample generate password
-	//passwordSecret := []byte("supersecret")
-	//passwordSecret := []byte("supersecret123")
-	/*
-		passwordSecret := []byte("supersecret45")
-
-		hashPassword, err := bcrypt.GenerateFromPassword(passwordSecret, bcrypt.DefaultCost)
-		if err != nil {
-			fmt.Println("error bcryt password", err)
-		} else {
-			fmt.Println("ok bcryt password")
-			fmt.Println(string(hashPassword))
-
-			var sqlDBStmt *sql.Stmt
-			var err error
-
-			sqlDBStmt, err = SqlDB.Prepare("update user set password=? where id=5")
-			if err != nil {
-				panic(err)
-			}
-
-			_, err = sqlDBStmt.Exec(string(hashPassword))
-			if err != nil {
-				panic(err)
-			} else {
-				fmt.Println("ok genrate password")
-			}
-
-			err = bcrypt.CompareHashAndPassword(hashPassword, passwordSecret)
-			if err != nil {
-				fmt.Println(err) // nil means it is a match
-			} else {
-				fmt.Println("matched password")
-			}
-		}*/
-
 	router := mux.NewRouter()
 
 	router.HandleFunc("/token", tokenAPI).Methods("POST")
