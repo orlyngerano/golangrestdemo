@@ -13,6 +13,8 @@ import (
 
 	"errors"
 
+	"fmt"
+
 	jwt "github.com/dgrijalva/jwt-go"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
@@ -39,6 +41,25 @@ var SqlDB *sql.DB
 var dbDSN = dbUser + ":" + dbPassword + "@/" + dbName + "?charset=utf8"
 var internalError = errors.New("internal error")
 var signingKey = []byte("secret")
+
+func tokenValidity(rawToken string) (jwt.MapClaims, error) {
+	token, err := jwt.Parse(rawToken, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+		}
+		return signingKey, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		return claims, nil
+	}
+
+	return nil, errors.New("Invalid")
+}
 
 /*
 * DB functions
@@ -191,9 +212,12 @@ func tokenAPI(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	fmt.Println("firstname f:", existingUser.Firstname)
+	fmt.Println("lastname f:", existingUser.Lastname)
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"firstname": user.Firstname,
-		"lastname":  user.Lastname,
+		"firstname": existingUser.Firstname,
+		"lastname":  existingUser.Lastname,
 		"exp":       time.Now().Add(time.Hour * tokenExpiration).Unix(),
 	})
 
@@ -302,4 +326,5 @@ func main() {
 
 	log.Fatal(http.ListenAndServe(":12345", router))
 	defer SqlDB.Close()
+
 }
