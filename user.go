@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -18,12 +19,14 @@ import (
 	jwt "github.com/dgrijalva/jwt-go"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
+	"github.com/urfave/negroni"
 )
 
 const (
 	dbUser          = "anyuser"
 	dbPassword      = "anypassword"
 	dbName          = "anydbname"
+	serverPort      = 12345
 	tokenExpiration = 24 //24hrs
 )
 
@@ -197,6 +200,9 @@ func tokenAPI(w http.ResponseWriter, req *http.Request) {
 	var user User
 	_ = json.NewDecoder(req.Body).Decode(&user)
 
+	fmt.Println("use post")
+	fmt.Println(user)
+
 	existingUser, err := getUserByUsername(user.Username)
 	if err == sql.ErrNoRows {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -301,6 +307,38 @@ func updateUserAPI(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+//middleware for checking authorize token
+func tokenMiddleware(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+
+	//dont include token endpoint
+	if r.URL.Path == "/token" {
+		next(rw, r)
+		return
+	}
+
+	//check jwt token
+	authorization := r.Header.Get("Authorization")
+	if len(authorization) < 1 {
+		rw.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	bearerToken := strings.Split(authorization, " ")
+	if bearerToken[0] != "Bearer" {
+		rw.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	token := bearerToken[1]
+	_, err := tokenValidity(token)
+	if err != nil {
+		rw.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	next(rw, r)
+}
+
 func main() {
 	//db
 	var err error
@@ -324,7 +362,11 @@ func main() {
 	router.HandleFunc("/user/{id}", deleteUserAPI).Methods("DELETE")
 	router.HandleFunc("/user/{id}", updateUserAPI).Methods("PUT")
 
-	log.Fatal(http.ListenAndServe(":12345", router))
+	//add token authorization filtering
+	n := negroni.New(negroni.HandlerFunc(tokenMiddleware))
+	n.UseHandler(router)
+
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", serverPort), n))
 	defer SqlDB.Close()
 
 }
